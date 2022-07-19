@@ -57,16 +57,16 @@ pub fn sub<'s, Context, const N: usize>(_: &mut Context, pool: &'s Pool<'s, N>, 
 
 pub type Builtin<'s, Context, const N: usize> = fn(context: &mut Context, pool: &'s Pool<'s, N>, list: RcValue<'s>) -> RcValue<'s>;
 
-pub struct Builtins<'s, Context, const N: usize, const M: usize> {
-    map: FnvIndexMap<&'s str, Builtin<'s, Context, N>, M>
+pub struct Builtins<'s, Context, const N: usize, const BUILTINS: usize> {
+    map: FnvIndexMap<&'s str, Builtin<'s, Context, N>, BUILTINS>,
 }
 
-impl <'s, Context, const N: usize, const M: usize> Builtins<'s, Context, N, M> {
+impl <'s, Context, const N: usize, const BUILTINS: usize> Builtins<'s, Context, N, BUILTINS> {
     pub fn new() -> Self {
         let map = FnvIndexMap::new();
         let mut this = Self { map };
-        this.add("+", add as Builtin<'s, Context, N>);
-        this.add("-", sub as Builtin<'s, Context, N>);
+        this.add("+", add);
+        this.add("-", sub);
 
         return this;
     }
@@ -77,7 +77,10 @@ impl <'s, Context, const N: usize, const M: usize> Builtins<'s, Context, N, M> {
         }
     }
 
-    pub fn get(&self, key: &'_ str) -> Option<&'_ Builtin<'s, Context, N>> {
-        self.map.get(key)
+    pub fn call(&self, key: &'_ str, context: &mut Context, pool: &'s Pool<'s, N>,  args: RcValue<'s>) -> Option<RcValue<'s>> {
+        match self.map.get(key) {
+            Some(f) => Some(f(context, pool, args)),
+            None => None
+        }
     }
 }

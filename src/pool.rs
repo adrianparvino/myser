@@ -6,34 +6,38 @@ use core::ops::Deref;
 use core::fmt;
 
 pub struct ValueCell<'s> {
-    cell: UnsafeCell<MaybeUninit<Value<'s>>>,
-    rc: AtomicIsize
+    cell: MaybeUninit<Value<'s>>,
+    rc: usize
 }
 
 pub struct RcValue<'s>(*mut ValueCell<'s>);
 impl<'s> Clone for RcValue<'s> {
     fn clone(&self) -> Self {
         let inner = unsafe { &mut *self.0 };
-        inner.rc.fetch_add(1, Ordering::AcqRel);
+        inner.rc += 1;
 
         RcValue(self.0)
     }
 }
 impl<'s> Drop for RcValue<'s> {
     fn drop(&mut self) {
-        let inner = unsafe { &mut *self.0 };
-        if inner.rc.fetch_sub(1, Ordering::Release) != 1 {
-            return;
-        }
+        unsafe {
+            let inner = &mut *self.0;
+            inner.rc -= 1;
 
-        let _ = unsafe { inner.cell.get().replace(MaybeUninit::uninit()).assume_init() };
+            if inner.rc > 0 {
+                return;
+            }
+
+            std::mem::replace(&mut inner.cell, MaybeUninit::uninit()).assume_init();
+        }
     }
 }
 impl<'s> Deref for RcValue<'s> {
     type Target = Value<'s>;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { (&mut *(*self.0).cell.get()).assume_init_ref() }
+        unsafe { (*self.0).cell.assume_init_ref() }
     }
 }
 impl<'s> fmt::Debug for RcValue<'s> {
@@ -45,6 +49,7 @@ impl<'s> fmt::Debug for RcValue<'s> {
 
 pub struct Pool<'s, const N: usize> {
     pool: [UnsafeCell<ValueCell<'s>>; N],
+    alloced: UnsafeCell<usize>,
 }
 
 unsafe impl<'s, const N: usize> Sync for Pool<'s, N> {}
@@ -53,22 +58,39 @@ impl<'s, const N: usize> Pool<'s, N> {
     pub fn new() -> Self {
         Pool {
             pool: unsafe { MaybeUninit::zeroed().assume_init() },
+            alloced: UnsafeCell::new(0)
         }
     }
 
     fn alloc(&self, value: Value<'s>) -> Result<RcValue<'s>, Value<'s>> {
-        for cell in self.pool.iter() {
-            let cell = unsafe { &mut *cell.get() };
-            if cell.rc.fetch_add(1, Ordering::AcqRel) != 0 {
-                cell.rc.fetch_sub(1, Ordering::AcqRel);
-                continue;
-            }
+        let n: usize = unsafe {
+            self.alloced.get().write(*self.alloced.get() + 1);
+            *self.alloced.get() % N
+        };
 
-            unsafe { cell.cell.get().write(MaybeUninit::new(value)) }
+        for cell in self.pool[n..N].iter() {
+            let cell_ptr = cell.get();
+            let mut cell = unsafe { &mut *cell_ptr };
 
-            return Ok(RcValue(cell));
+            if cell.rc > 0 { continue; }
+
+            cell.rc = 1;
+            cell.cell = MaybeUninit::new(value);
+
+            return Ok(RcValue(cell_ptr));
         }
 
+        for cell in self.pool[0..n].iter() {
+            let cell_ptr = cell.get();
+            let mut cell = unsafe { &mut *cell_ptr };
+
+            if cell.rc > 0 { continue; }
+
+            cell.rc = 1;
+            cell.cell = MaybeUninit::new(value);
+
+            return Ok(RcValue(cell_ptr));
+        }
         Err(value)
     }
 

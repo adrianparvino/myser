@@ -1,7 +1,8 @@
 use crate::{pool::{RcValue, Pool}, value::Value, builtins::Builtins};
 use core::ops::Deref;
-use heapless::FnvIndexMap;
+use heapless::{Vec, FnvIndexMap};
 
+#[inline(always)]
 pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS: usize>(
     context: &mut Context,
     pool: &'s Pool<'s, N>,
@@ -9,18 +10,25 @@ pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS
     builtins: &Builtins<'s, Context, N, BUILTINS>,
     list: RcValue<'s>
 ) -> RcValue<'s> {
-    match list.deref() {
-        Value::Cons(car, cdr) => {
-            let car_ = eval(context, pool, cells, builtins, car.clone());
-            let cdr_ = eval_list(context, pool, cells, builtins, cdr.clone());
+    let mut stack: Vec<_, 16> = Vec::new();
 
-            pool.new_cons(car_, cdr_)
-        },
-        Value::Symbol("nil") => {
-            pool.new_symbol("nil")
-        }
-        _ => panic!()
+    let mut list = &list;
+    while let Value::Cons(car, cdr) = list.deref() {
+        stack.push(car);
+        list = cdr;
     }
+
+    let mut list = list.clone();
+
+    if let Value::Symbol("nil") = list.deref() {
+        stack.reverse();
+        for item in stack.into_iter() {
+            let car_ = eval(context, pool, cells, builtins, item.clone());
+            list = pool.new_cons(car_, list.clone());
+        }
+    }
+
+    return list;
 }
 
 pub struct Cells<'s, const N: usize> {
@@ -67,7 +75,6 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
                     if let Value::Cons(binding, ast) = ast.deref() {
                         if let Value::Cons(key, value) = binding.deref() {
                             if let Value::Symbol(key) = key.deref() {
-                                let mut ast = ast;
                                 let value = eval(context, pool, cells, builtins, value.clone());
 
                                 let old_value = cells.values.get(key).map(|x| x.clone());
@@ -75,6 +82,7 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
 
                                 let mut result = pool.new_symbol("nil");
 
+                                let mut ast = ast;
                                 while let Value::Cons(car, cdr) = ast.deref() {
                                     result = eval(context, pool, cells, builtins, car.clone());
                                     ast = cdr;
@@ -129,14 +137,10 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
 
                     panic!()
                 },
-                Value::Symbol("nil") => {
-                    return pool.new_symbol("nil");
-                },
                 Value::Symbol(builtin) => {
-                    if let Some(f) = builtins.get(builtin) {
-                        let rest = eval_list(context, pool, cells, builtins, ast.clone());
-
-                        return f(context, pool, rest);
+                    let list = eval_list(context, pool, cells, builtins, ast.clone());
+                    if let Some(x) = builtins.call(builtin, context, pool, list) {
+                        return x;
                     }
 
                     return pool.new_symbol("nil");
@@ -144,7 +148,8 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
                 _ => panic!()
             }
         }
-        Value::Integer(n) => pool.new_integer(*n),
+        Value::Symbol("nil") => ast,
+        Value::Integer(_) => ast,
         Value::Symbol(symbol) => cells.values.get(symbol).map(|x| x.clone()).unwrap_or_else(|| pool.new_symbol("nil")),
         _ => panic!()
     }

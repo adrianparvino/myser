@@ -44,7 +44,14 @@ impl Context {
 fn print<'s, Context: HasStdout, const N: usize>(context: &mut Context, pool: &'s Pool<'s, N>, args: RcValue<'s>) -> RcValue<'s> {
     if let Value::Cons(car, cdr) = args.deref() {
         if let Value::Symbol("nil") = cdr.deref() {
-            write!(context.stdout(), "{:?}\n", car).unwrap();
+            match car.deref() {
+                Value::Integer(n) => {
+                    write!(context.stdout(), "{}", n);
+                },
+                car => {
+                    write!(context.stdout(), "{:?}", car);
+                }
+            }
 
             return pool.new_symbol("nil");
         }
@@ -69,7 +76,7 @@ fn main() {
     let mut buffer = String::new();
 
     let pool: Pool<'_, 10000> = Pool::new();
-    let mut builtins: Builtins<'_, _, 10000, 16> = Builtins::new();
+    let mut builtins: Builtins<'_, _, 10000, 64> = Builtins::new();
     builtins.add("print", print as Builtin<'_, _, 10000>);
     builtins.add("read", read as Builtin<'_, _, 10000>);
 
@@ -79,7 +86,7 @@ fn main() {
     std::io::stdin().read_line(&mut buffer).unwrap();
 
     let result = parse(&pool, &buffer).unwrap().1;
-    println!("{:?}", result);
+    // println!("{:?}", result);
     // println!("{:?}", pool.used());
     eval(&mut context, &pool, &mut cells, &builtins, result);
     // println!("{:?}", result);
