@@ -46,10 +46,10 @@ fn print<'s, Context: HasStdout, const N: usize>(context: &mut Context, pool: &'
         if let Value::Symbol("nil") = cdr.deref() {
             match car.deref() {
                 Value::Integer(n) => {
-                    write!(context.stdout(), "{}", n);
+                    write!(context.stdout(), "{}\n", n).unwrap();
                 },
                 car => {
-                    write!(context.stdout(), "{:?}", car);
+                    write!(context.stdout(), "{:?}\n", car).unwrap();
                 }
             }
 

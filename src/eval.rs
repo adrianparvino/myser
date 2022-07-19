@@ -14,7 +14,7 @@ pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS
 
     let mut list = &list;
     while let Value::Cons(car, cdr) = list.deref() {
-        stack.push(car);
+        stack.push(car).unwrap();
         list = cdr;
     }
 
