@@ -1,4 +1,5 @@
-use crate::{constants::NIL_SYM, pool::Pool, value::Value, builtins::Builtins};
+use crate::{pool::{RcValue, Pool}, value::Value, builtins::Builtins};
+use core::ops::Deref;
 use heapless::FnvIndexMap;
 
 pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS: usize>(
@@ -6,22 +7,17 @@ pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS
     pool: &'s Pool<'s, N>,
     cells: &mut Cells<'s, CELLS>,
     builtins: &Builtins<'s, Context, N, BUILTINS>,
-    list: &'s Value<'s>
-) -> &'s Value<'s> {
-    match list {
-        cons @ &Value::Cons(car, cdr) => {
-            let car_ = eval(context, pool, cells, builtins, car);
-            let cdr_ = eval_list(context, pool, cells, builtins, cdr);
-
-            if car as *const Value<'s> == car_ as *const Value<'s>
-            && cdr as *const Value<'s> == cdr_ as *const Value<'s> {
-                    return cons;
-            }
+    list: RcValue<'s>
+) -> RcValue<'s> {
+    match list.deref() {
+        Value::Cons(car, cdr) => {
+            let car_ = eval(context, pool, cells, builtins, car.clone());
+            let cdr_ = eval_list(context, pool, cells, builtins, cdr.clone());
 
             pool.new_cons(car_, cdr_)
         },
-        nil @ Value::Symbol("nil") => {
-            nil
+        Value::Symbol("nil") => {
+            pool.new_symbol("nil")
         }
         _ => panic!()
     }
@@ -29,7 +25,7 @@ pub fn eval_list<'s, Context, const N: usize, const BUILTINS: usize, const CELLS
 
 pub struct Cells<'s, const N: usize> {
     // functions: FnvIndexMap<&'s str, &'s Value<'s>, N>,
-    values: FnvIndexMap<&'s str, &'s Value<'s>, N>
+    values: FnvIndexMap<&'s str, RcValue<'s>, N>
 }
 
 impl<'s: 'cells, 'cells, const N: usize> Cells<'s, N> {
@@ -40,7 +36,7 @@ impl<'s: 'cells, 'cells, const N: usize> Cells<'s, N> {
         }
     }
 
-    pub fn add_value(&mut self, key: &'s str, value: &'s Value<'s>) {
+    pub fn add_value(&mut self, key: &'s str, value: RcValue<'s>) {
         self.values.insert(key, value).unwrap();
     }
 }
@@ -50,79 +46,106 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
     pool: &'s Pool<'s, N>,
     cells: &'cells mut Cells<'s, CELLS>,
     builtins: &Builtins<'s, Context, N, BUILTINS>,
-    ast: &'s Value<'s>
-) -> &'s Value<'s> {
-    match ast {
-        Value::Cons(Value::Symbol("progn"), mut ast) => {
-            let mut result = &NIL_SYM;
+    ast: RcValue<'s>
+) -> RcValue<'s> {
+    match ast.deref() {
+        Value::Cons(car, ast) => {
+            match car.deref() {
+                Value::Symbol("progn") => {
+                    let mut ast = ast;
 
-            while let Value::Cons(car, cdr) = ast {
-                result = eval(context, pool, cells, builtins, car);
-                ast = cdr;
-            }
+                    let mut result = pool.new_symbol("nil");
 
-            result
-        },
-        Value::Cons(Value::Symbol("let-"), Value::Cons(Value::Cons(Value::Symbol(key), value), mut ast)) => {
-            let value = eval(context, pool, cells, builtins, value);
-            let mut result = &NIL_SYM;
+                    while let Value::Cons(car, cdr) = ast.deref() {
+                        result = eval(context, pool, cells, builtins, car.clone());
+                        ast = &cdr;
+                    }
 
-            let old_value = cells.values.get(key).map(|x| *x);
-            cells.values.insert(key, value).unwrap();
-
-            while let Value::Cons(car, cdr) = ast {
-                result = eval(context, pool, cells, builtins, car);
-                ast = cdr;
-            }
-
-            if let Some(old_value) = old_value {
-                cells.values.insert(key, old_value).unwrap();
-            } else {
-                cells.values.remove(key).unwrap();
-            }
-
-            result
-        },
-        Value::Cons(Value::Symbol("def"), Value::Cons(Value::Symbol(key), Value::Cons(ast, Value::Symbol("nil")))) => {
-            let value = eval(context, pool, cells, builtins, ast);
-            cells.add_value(key, value);
-
-            &NIL_SYM
-        },
-        Value::Cons(Value::Symbol("while"), Value::Cons(condition, ast)) => {
-            while {
-                match eval(context, pool, cells, builtins, condition) {
-                    Value::Integer(0) => false,
-                    Value::Symbol("nil") => false,
-                    _ => true
+                    result
                 }
-            }{
-                let mut ast = ast;
+                Value::Symbol("let-") => {
+                    if let Value::Cons(binding, ast) = ast.deref() {
+                        if let Value::Cons(key, value) = binding.deref() {
+                            if let Value::Symbol(key) = key.deref() {
+                                let mut ast = ast;
+                                let value = eval(context, pool, cells, builtins, value.clone());
 
-                while let Value::Cons(car, cdr) = ast {
-                    eval(context, pool, cells, builtins, car);
-                    ast = cdr;
-                }
+                                let old_value = cells.values.get(key).map(|x| x.clone());
+                                cells.values.insert(key, value).unwrap();
+
+                                let mut result = pool.new_symbol("nil");
+
+                                while let Value::Cons(car, cdr) = ast.deref() {
+                                    result = eval(context, pool, cells, builtins, car.clone());
+                                    ast = cdr;
+                                }
+
+                                if let Some(old_value) = old_value {
+                                    cells.values.insert(key, old_value).unwrap();
+                                } else {
+                                    cells.values.remove(key).unwrap();
+                                }
+
+                                return result;
+                            }
+                        }
+                    }
+
+                    panic!()
+                },
+                Value::Symbol("set") => {
+                    if let Value::Cons(key, ast) = ast.deref() {
+                        if let Value::Cons(value, _) = ast.deref() {
+                            if let Value::Symbol(key) = key.deref() {
+                                let value = eval(context, pool, cells, builtins, value.clone());
+                                cells.add_value(key, value);
+
+                                return pool.new_symbol("nil")
+                            }
+                        }
+                    }
+
+                    panic!()
+                },
+                Value::Symbol("while") => {
+                    if let Value::Cons(condition, ast) = ast.deref() {
+                        while {
+                            match *eval(context, pool, cells, builtins, condition.clone()) {
+                                Value::Integer(0) => false,
+                                Value::Symbol("nil") => false,
+                                _ => true
+                            }
+                        }{
+                            let mut ast = ast;
+
+                            while let Value::Cons(car, cdr) = ast.deref() {
+                                eval(context, pool, cells, builtins, car.clone());
+                                ast = cdr;
+                            }
+                        }
+
+                        return pool.new_symbol("nil");
+                    }
+
+                    panic!()
+                },
+                Value::Symbol("nil") => {
+                    return pool.new_symbol("nil");
+                },
+                Value::Symbol(builtin) => {
+                    if let Some(f) = builtins.get(builtin) {
+                        let rest = eval_list(context, pool, cells, builtins, ast.clone());
+
+                        return f(context, pool, rest);
+                    }
+
+                    return pool.new_symbol("nil");
+                },
+                _ => panic!()
             }
-
-            &NIL_SYM
         }
-        Value::Cons(Value::Symbol(builtin), rest) => {
-            if let Some(f) = builtins.get(builtin) {
-                let rest = eval_list(context, pool, cells, builtins, rest);
-
-                return f(context, pool, rest);
-            }
-
-            return &NIL_SYM;
-        }
-        n @ Value::Integer(_) => n,
-        nil @ Value::Symbol("nil") => nil,
-        Value::Symbol(symbol) => cells.values.get(symbol).map(|x| *x).unwrap_or(&NIL_SYM),
-        Value::Cons(car, cdr) => pool.new_cons(
-            eval(context, pool, cells, builtins, car),
-            eval(context, pool, cells, builtins, cdr),
-        ),
+        Value::Integer(n) => pool.new_integer(*n),
+        Value::Symbol(symbol) => cells.values.get(symbol).map(|x| x.clone()).unwrap_or_else(|| pool.new_symbol("nil")),
         _ => panic!()
     }
 }

@@ -1,49 +1,61 @@
-use crate::{constants::{ZERO, NIL_SYM}, pool::Pool, value::Value};
+use crate::{pool::{Pool, RcValue}, value::Value};
+use core::ops::Deref;
 use heapless::FnvIndexMap;
 
-pub fn add<'s, Context, const N: usize>(_: &mut Context, pool: &'s Pool<'s, N>, mut args: &'s Value<'s>) -> &'s Value<'s> {
+pub fn add<'s, Context, const N: usize>(_: &mut Context, pool: &'s Pool<'s, N>, mut args: RcValue<'s>) -> RcValue<'s> {
     let mut result = 0;
 
     loop {
-        match args {
-            Value::Cons(Value::Integer(car), cdr) => {
-                result += car;
-                args = cdr;
+        match args.deref() {
+            Value::Cons(car, cdr) => {
+                if let Value::Integer(car) = car.deref() {
+                    result += car;
+                    args = cdr.clone();
+                }
             },
             Value::Symbol("nil") => { return pool.new_integer(result); },
             _ => {
-                return &NIL_SYM;
+                return pool.new_symbol("nil");
             }
         }
     }
 }
 
-pub fn sub<'s, Context, const N: usize>(_: &mut Context, pool: &'s Pool<'s, N>, args: &'s Value<'s>) -> &'s Value<'s> {
-    match args {
-        Value::Cons(Value::Integer(car), Value::Symbol("nil")) => {
-            return pool.new_integer(-car);
-        },
-        Value::Cons(&Value::Integer(car), mut args) => {
-            let mut result = car;
+pub fn sub<'s, Context, const N: usize>(_: &mut Context, pool: &'s Pool<'s, N>, args: RcValue<'s>) -> RcValue<'s> {
+    match args.deref() {
+        Value::Cons(car, args) => {
+            if let Value::Integer(car) = car.deref() {
+                if let  Value::Symbol("nil") = args.deref() {
+                    return pool.new_integer(-car);
+                } else {
+                    let mut args = args;
+                    let mut result = *car;
 
-            loop {
-                match args {
-                    Value::Cons(Value::Integer(car), cdr) => {
-                        result -= car;
-                        args = cdr;
-                    },
-                    Value::Symbol("nil") => { return pool.new_integer(result); },
-                    _ => {
-                        return &NIL_SYM;
+                    loop {
+                        match args.deref() {
+                            Value::Cons(car, cdr) => {
+                                if let Value::Integer(car) = car.deref() {
+                                    result -= car;
+                                    args = cdr;
+                                } else {
+                                    return pool.new_integer(result);
+                                }
+                            },
+                            Value::Symbol("nil") => { return pool.new_integer(result); },
+                            _ => {
+                                return pool.new_symbol("nil");
+                            }
+                        }
                     }
                 }
             }
+            pool.new_integer(0)
         },
-        _ => &ZERO
+        _ => pool.new_integer(0)
     }
 }
 
-pub type Builtin<'s, Context, const N: usize> = fn(context: &mut Context, pool: &'s Pool<'s, N>, list: &'s Value<'s>) -> &'s Value<'s>;
+pub type Builtin<'s, Context, const N: usize> = fn(context: &mut Context, pool: &'s Pool<'s, N>, list: RcValue<'s>) -> RcValue<'s>;
 
 pub struct Builtins<'s, Context, const N: usize, const M: usize> {
     map: FnvIndexMap<&'s str, Builtin<'s, Context, N>, M>

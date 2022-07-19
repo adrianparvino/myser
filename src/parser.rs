@@ -8,21 +8,19 @@ use nom::{
     combinator::map,
 };
 
-use crate::value::Value;
-use crate::pool::Pool;
-use crate::constants::NIL_SYM;
+use crate::pool::{Pool, RcValue};
 
-pub fn integer<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn integer<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     map(character::i64, |n| pool.new_integer(n))(input)
 }
 
-pub fn cons_end<'s>(input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn cons_end<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     let (input, _) = bytes::tag(")")(input)?;
-    Ok((input, &NIL_SYM))
+    Ok((input, pool.new_symbol("nil")))
 }
 
-pub fn cons_pair<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn cons_pair<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     let (input, _) = bytes::tag(".")(input)?;
     let (input, _) = character::space0(input)?;
@@ -32,9 +30,9 @@ pub fn cons_pair<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> I
     Ok((input, cdr))
 }
 
-pub fn cons_rest<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn cons_rest<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     alt((
-        cons_end,
+        |input| cons_end(pool, input),
         |input| cons_pair(pool, input),
         |input| {
             let (input, _) = character::space0(input)?;
@@ -46,7 +44,7 @@ pub fn cons_rest<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> I
     ))(input)
 }
 
-pub fn cons<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn cons<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     let (input, _) = bytes::tag("(")(input)?;
     let (input, car) = parse(pool, input)?;
@@ -55,7 +53,7 @@ pub fn cons<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResul
     Ok((input, pool.new_cons(car, cdr)))
 }
 
-pub fn symbol<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn symbol<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     let (input, symbol) = input.split_at_position(
         |c| !c.is_alphanum() && c != '+' && c != '-'
@@ -63,7 +61,7 @@ pub fn symbol<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IRes
     Ok((input, pool.new_symbol(symbol)))
 }
 
-pub fn parse<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, &'s Value<'s>> {
+pub fn parse<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     alt((
         |input| cons(pool, input),

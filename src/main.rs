@@ -4,11 +4,10 @@ use myser::{
     builtins::{Builtin, Builtins},
     eval::{eval, Cells},
     parser::parse,
-    pool::Pool,
+    pool::{RcValue, Pool},
     value::Value,
-    constants::NIL_SYM
 };
-
+use core::ops::Deref;
 use std::io::Write;
 
 trait HasStdin {
@@ -42,16 +41,20 @@ impl Context {
     }
 }
 
-fn print<'s, Context: HasStdout, const N: usize>(context: &mut Context, _: &'s Pool<'s, N>, args: &'s Value<'s>) -> &'s Value<'s> {
-    match args {
-        Value::Cons(car, Value::Symbol("nil")) => { write!(context.stdout(), "{:?}\n", car).unwrap(); },
-        args => { write!(context.stdout(), "{:?}\n", args).unwrap(); }
+fn print<'s, Context: HasStdout, const N: usize>(context: &mut Context, pool: &'s Pool<'s, N>, args: RcValue<'s>) -> RcValue<'s> {
+    if let Value::Cons(car, cdr) = args.deref() {
+        if let Value::Symbol("nil") = cdr.deref() {
+            write!(context.stdout(), "{:?}\n", car).unwrap();
+
+            return pool.new_symbol("nil");
+        }
     }
 
-    &NIL_SYM
+    write!(context.stdout(), "{:?}\n", args).unwrap();
+    pool.new_symbol("nil")
 }
 
-fn read<'s, Context: HasStdin, const N: usize>(context: &mut Context, pool: &'s Pool<'s, N>, _: &'s Value<'s>) -> &'s Value<'s> {
+fn read<'s, Context: HasStdin, const N: usize>(context: &mut Context, pool: &'s Pool<'s, N>, _: RcValue<'s>) -> RcValue<'s> {
     let mut buffer = String::new();
     context.stdin().read_line(&mut buffer).unwrap();
 
@@ -59,16 +62,16 @@ fn read<'s, Context: HasStdin, const N: usize>(context: &mut Context, pool: &'s 
         return pool.new_integer(n);
     }
 
-    &NIL_SYM
+    pool.new_symbol("nil")
 }
 
 fn main() {
     let mut buffer = String::new();
 
-    let pool: Pool<'_, 100> = Pool::new();
-    let mut builtins: Builtins<'_, _, 100, 16> = Builtins::new();
-    builtins.add("print", print as Builtin<'_, _, 100>);
-    builtins.add("read", read as Builtin<'_, _, 100>);
+    let pool: Pool<'_, 10000> = Pool::new();
+    let mut builtins: Builtins<'_, _, 10000, 16> = Builtins::new();
+    builtins.add("print", print as Builtin<'_, _, 10000>);
+    builtins.add("read", read as Builtin<'_, _, 10000>);
 
     let mut context = Context::new(std::io::stdin(), std::io::stdout());
     let mut cells: Cells<'_, 16> = Cells::new();
@@ -76,7 +79,7 @@ fn main() {
     std::io::stdin().read_line(&mut buffer).unwrap();
 
     let result = parse(&pool, &buffer).unwrap().1;
-    // println!("{:?}", result);
+    println!("{:?}", result);
     // println!("{:?}", pool.used());
     eval(&mut context, &pool, &mut cells, &builtins, result);
     // println!("{:?}", result);

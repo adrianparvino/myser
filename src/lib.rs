@@ -1,4 +1,3 @@
-#![no_std]
 pub mod builtins;
 pub mod constants;
 pub mod eval;
