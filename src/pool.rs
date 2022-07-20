@@ -1,19 +1,20 @@
 use crate::value::Value;
 use core::mem::MaybeUninit;
-use core::cell::UnsafeCell;
+use core::cell::{Cell, UnsafeCell};
 use core::ops::Deref;
+use core::ptr;
 use core::fmt;
 
 pub struct ValueCell<'s> {
-    cell: MaybeUninit<Value<'s>>,
-    rc: usize
+    cell: UnsafeCell<MaybeUninit<Value<'s>>>,
+    rc: Cell<usize>
 }
 
-pub struct RcValue<'s>(*mut ValueCell<'s>);
+pub struct RcValue<'s>(*const ValueCell<'s>);
 impl<'s> Clone for RcValue<'s> {
     fn clone(&self) -> Self {
-        let inner = unsafe { &mut *self.0 };
-        inner.rc += 1;
+        let inner = unsafe { &*self.0 };
+        inner.rc.set(inner.rc.get() + 1);
 
         RcValue(self.0)
     }
@@ -21,14 +22,14 @@ impl<'s> Clone for RcValue<'s> {
 impl<'s> Drop for RcValue<'s> {
     fn drop(&mut self) {
         unsafe {
-            let inner = &mut *self.0;
-            inner.rc -= 1;
+            let inner = &*self.0;
+            inner.rc.set(inner.rc.get() - 1);
 
-            if inner.rc > 0 {
+            if inner.rc.get() > 0 {
                 return;
             }
 
-            std::mem::replace(&mut inner.cell, MaybeUninit::uninit()).assume_init();
+            ptr::drop_in_place((&mut *inner.cell.get()).assume_init_mut());
         }
     }
 }
@@ -36,7 +37,7 @@ impl<'s> Deref for RcValue<'s> {
     type Target = Value<'s>;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { (*self.0).cell.assume_init_ref() }
+        unsafe { (*(*self.0).cell.get()).assume_init_ref() }
     }
 }
 impl<'s> fmt::Debug for RcValue<'s> {
@@ -47,7 +48,7 @@ impl<'s> fmt::Debug for RcValue<'s> {
 
 
 pub struct Pool<'s, const N: usize> {
-    pool: [UnsafeCell<ValueCell<'s>>; N],
+    pool: [ValueCell<'s>; N],
     alloced: UnsafeCell<usize>,
 }
 
@@ -68,27 +69,25 @@ impl<'s, const N: usize> Pool<'s, N> {
         };
 
         for cell in self.pool[n..N].iter() {
-            let cell_ptr = cell.get();
-            let mut cell = unsafe { &mut *cell_ptr };
+            if cell.rc.get() > 0 { continue; }
 
-            if cell.rc > 0 { continue; }
+            cell.rc.set(1);
+            unsafe {
+                cell.cell.get().write(MaybeUninit::new(value));
+            }
 
-            cell.rc = 1;
-            cell.cell = MaybeUninit::new(value);
-
-            return Ok(RcValue(cell_ptr));
+            return Ok(RcValue(cell));
         }
 
         for cell in self.pool[0..n].iter() {
-            let cell_ptr = cell.get();
-            let mut cell = unsafe { &mut *cell_ptr };
+            if cell.rc.get() > 0 { continue; }
 
-            if cell.rc > 0 { continue; }
+            cell.rc.set(1);
+            unsafe {
+                cell.cell.get().write(MaybeUninit::new(value));
+            }
 
-            cell.rc = 1;
-            cell.cell = MaybeUninit::new(value);
-
-            return Ok(RcValue(cell_ptr));
+            return Ok(RcValue(cell));
         }
         Err(value)
     }
