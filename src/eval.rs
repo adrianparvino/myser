@@ -138,9 +138,10 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
                     panic!()
                 },
                 Value::Symbol(builtin) => {
-                    let list = eval_list(context, pool, cells, builtins, ast.clone());
-                    if let Some(x) = builtins.call(builtin, context, pool, list) {
-                        return x;
+                    if let Some(f) = builtins.get(builtin) {
+                        let list = eval_list(context, pool, cells, builtins, ast.clone());
+
+                        return f(context, pool, list);
                     }
 
                     return pool.new_symbol("nil");

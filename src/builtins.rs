@@ -77,10 +77,7 @@ impl <'s, Context, const N: usize, const BUILTINS: usize> Builtins<'s, Context, 
         }
     }
 
-    pub fn call(&self, key: &'_ str, context: &mut Context, pool: &'s Pool<'s, N>,  args: RcValue<'s>) -> Option<RcValue<'s>> {
-        match self.map.get(key) {
-            Some(f) => Some(f(context, pool, args)),
-            None => None
-        }
+    pub fn get(&self, key: &'_ str) -> Option<&Builtin<'s, Context, N>> {
+        self.map.get(key)
     }
 }
