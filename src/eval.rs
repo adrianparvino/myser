@@ -120,6 +120,7 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
                         while {
                             match *eval(context, pool, cells, builtins, condition.clone()) {
                                 Value::Integer(0) => false,
+                                Value::Number(n) if n == 0.0 => false,
                                 Value::Symbol("nil") => false,
                                 _ => true
                             }
@@ -151,6 +152,7 @@ pub fn eval<'cells, 's: 'cells, Context, const N: usize, const BUILTINS: usize, 
         }
         Value::Symbol("nil") => ast,
         Value::Integer(_) => ast,
+        Value::Number(_) => ast,
         Value::Symbol(symbol) => cells.values.get(symbol).map(|x| x.clone()).unwrap_or_else(|| pool.new_symbol("nil")),
         _ => panic!()
     }

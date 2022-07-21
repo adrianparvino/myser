@@ -5,13 +5,20 @@ use nom::{
     branch::alt,
     bytes::complete as bytes,
     character::complete as character,
-    combinator::map,
+    combinator::{not,peek,map},
 };
 
 use crate::pool::{Pool, RcValue};
 
 pub fn integer<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
-    map(character::i64, |n| pool.new_integer(n))(input)
+    let (input, result) = map(character::i64, |n| pool.new_integer(n))(input)?;
+    let (input, _) = not(peek(bytes::tag(".")))(input)?;
+
+    Ok((input, result))
+}
+
+pub fn number<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
+    map(nom::number::complete::double, |x| pool.new_number(x))(input)
 }
 
 pub fn cons_end<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
@@ -56,7 +63,7 @@ pub fn cons<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResul
 pub fn symbol<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResult<&'s str, RcValue<'s>> {
     let (input, _) = character::space0(input)?;
     let (input, symbol) = input.split_at_position(
-        |c| !c.is_alphanum() && c != '+' && c != '-'
+        |c| !c.is_alphanum() && c != '+' && c != '-' && c != '*' && c != '/'
     )?;
     Ok((input, pool.new_symbol(symbol)))
 }
@@ -66,6 +73,7 @@ pub fn parse<'s, const N: usize>(pool: &'s Pool<'s, N>, input: &'s str) -> IResu
     alt((
         |input| cons(pool, input),
         |input| integer(pool, input),
+        |input| number(pool, input),
         |input| symbol(pool, input),
     ))(input)
 }

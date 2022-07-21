@@ -99,6 +99,10 @@ impl<'s, const N: usize> Pool<'s, N> {
         }
     }
 
+    pub fn new_number(&self, x: f64) -> RcValue<'s> {
+        self.alloc(Value::Number(x)).unwrap()
+    }
+
     pub fn new_symbol(&self, symbol: &'s str) -> RcValue<'s> {
         match symbol {
             // "+" => &PLUS_SYM,
